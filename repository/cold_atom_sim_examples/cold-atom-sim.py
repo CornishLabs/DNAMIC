@@ -3,8 +3,10 @@ from ndscan.experiment import (
     FloatParam, IntParam,
     IntChannel, FloatChannel, OpaqueChannel,
     MHz, us, ms,
-    make_fragment_scan_exp
+    make_fragment_scan_exp, CustomAnalysis, annotations
 )
+import oitg
+import math
 
 from models.atom_response import p_bright_detuned_rabi
 from components import PrepareAtom, Pulse, ReadoutFluorescence
@@ -48,4 +50,75 @@ class OneShot(SingleShotBase):
 
 
 OneShotCarrier, MultiShot = make_shot_chunk_exp_fragments_from_shot(OneShot)
-MultiShotExperiment = make_fragment_scan_exp(MultiShot)
+
+class MultiShotAnalysed(MultiShot):
+    def get_default_analyses(self):
+        return [
+            CustomAnalysis([self.carrier.shot.pulse.duration], self._analyse_time_scan, [
+                OpaqueChannel("t_pi_fit_xs"),
+                OpaqueChannel("t_pi_fit_ys"),
+                FloatChannel("t_pi", "Fitted π time", unit="us"),
+                FloatChannel("t_pi_err", "Fitted π time error", unit="us")
+            ]),
+            CustomAnalysis([self.carrier.shot.pulse.frequency], self._analyse_frequency_scan, [
+                OpaqueChannel("f0_fit_xs"),
+                OpaqueChannel("f0_fit_ys"),
+                FloatChannel("f0", "Fitted centre frequency", unit="us"),
+                FloatChannel("f0_err", "Fitted centre frequency error", unit="us")
+            ])
+        ]
+
+    def _analyse_time_scan(self, axis_values, result_values, analysis_results):
+        x = axis_values[self.carrier.shot.pulse.duration]
+        # See: https://oxfordiontrapgroup.github.io/ndscan/apidocs.html#module-ndscan.experiment.default_analysis
+        # Conceptually, analyses are attached to a fragment, and produce results “the next level up” 
+        #    – that is, they condense all the points from a scan over a particular choice of parameters into a few derived results.
+        y = result_values[self._p]
+        y_err = result_values[self._p_err]
+
+        fit_results, fit_errs, fit_xs, fit_ys = oitg.fitting.sinusoid.fit(
+            x, y, y_err, evaluate_function=True, evaluate_n=200)
+
+        analysis_results["t_pi"].push(fit_results["t_pi"])
+        analysis_results["t_pi_err"].push(fit_errs["t_pi"])
+        analysis_results["t_pi_fit_xs"].push(fit_xs)
+        analysis_results["t_pi_fit_ys"].push(fit_ys)
+
+        # We can also return custom annotations to be displayed, which can make use of
+        # the analysis results.
+        return [
+            annotations.axis_location(axis=self.carrier.shot.pulse.duration,
+                                      position=fit_results["t_pi"]-fit_results["t_dead"],
+                                      position_error=fit_errs["t_pi"]),
+            annotations.curve_1d(x_axis=self.carrier.shot.pulse.duration,
+                                 x_values=fit_xs,
+                                 y_axis=self._p,
+                                 y_values=fit_ys)
+        ]
+    
+    def _analyse_frequency_scan(self, axis_values, result_values, analysis_results):
+        x = axis_values[self.carrier.shot.pulse.frequency]
+        y = result_values[self._p]
+        y_err = result_values[self._p_err]
+
+        fit_results, fit_errs, fit_xs, fit_ys = oitg.fitting.sinc_2.fit(
+            x, y, y_err, evaluate_function=True, evaluate_n=200, initialise = {'y0':0.0, 'a': 1.0, 'width': 1e6})
+
+        analysis_results["f0"].push(fit_results["x0"])
+        analysis_results["f0_err"].push(fit_errs["x0"])
+        analysis_results["f0_fit_xs"].push(fit_xs)
+        analysis_results["f0_fit_ys"].push(fit_ys)
+
+        # We can also return custom annotations to be displayed, which can make use of
+        # the analysis results.
+        return [
+            annotations.axis_location(axis=self.carrier.shot.pulse.frequency,
+                                      position=fit_results["x0"],
+                                      position_error=fit_errs["x0"]),
+            annotations.curve_1d(x_axis=self.carrier.shot.pulse.frequency,
+                                 x_values=fit_xs,
+                                 y_axis=self._p,
+                                 y_values=fit_ys)
+        ]
+
+MultiShotExperiment = make_fragment_scan_exp(MultiShotAnalysed)

@@ -26,6 +26,7 @@ class RabiFlopWithAnalysis(RabiFlopSim):
 
     def _analyse_time_scan(self, axis_values, result_values, analysis_results):
         x = axis_values[self.duration]
+        print(result_values)
         y = result_values[self.readout.p]
         y_err = result_values[self.readout.p_err]
 
