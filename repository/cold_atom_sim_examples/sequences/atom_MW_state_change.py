@@ -8,11 +8,11 @@ from ndscan.experiment import (
 import oitg
 import math
 
-from models.atom_response import p_bright_detuned_rabi
-from components import PrepareAtom, Pulse, ReadoutFluorescence
+from cold_atom_sim_examples.models.atom_response import p_bright_detuned_rabi
+from cold_atom_sim_examples.components import PrepareAtom, Pulse, ReadoutFluorescence
 
-from reusable.make_shot_scan import make_shot_chunk_exp_fragments_from_shot
-from reusable.single_shot_base import SingleShotBase
+from cold_atom_sim_examples.reusable.make_shot_scan import make_shot_chunk_exp_fragments_from_shot
+from cold_atom_sim_examples.reusable.single_shot_base import SingleShotBase
 
 class OneShot(SingleShotBase):
     def build_fragment(self):
@@ -79,7 +79,7 @@ class MultiShotAnalysed(MultiShot):
         fit_results, fit_errs, fit_xs, fit_ys = oitg.fitting.sinusoid.fit(
             x, y, y_err, evaluate_function=True, evaluate_n=200)
 
-        analysis_results["t_pi"].push(fit_results["t_pi"])
+        analysis_results["t_pi"].push(fit_results["t_pi"]-fit_results["t_dead"])
         analysis_results["t_pi_err"].push(fit_errs["t_pi"])
         analysis_results["t_pi_fit_xs"].push(fit_xs)
         analysis_results["t_pi_fit_ys"].push(fit_ys)
@@ -109,8 +109,7 @@ class MultiShotAnalysed(MultiShot):
         analysis_results["f0_fit_xs"].push(fit_xs)
         analysis_results["f0_fit_ys"].push(fit_ys)
 
-        # We can also return custom annotations to be displayed, which can make use of
-        # the analysis results.
+
         return [
             annotations.axis_location(axis=self.carrier.shot.pulse.frequency,
                                       position=fit_results["x0"],
