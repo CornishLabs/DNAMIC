@@ -8,11 +8,11 @@ from ndscan.experiment import (
 import oitg
 import math
 
-from cold_atom_sim_examples.models.atom_response import p_bright_detuned_rabi
-from cold_atom_sim_examples.components import PrepareAtom, Pulse, ReadoutFluorescence
+from repository.models.atom_response import p_bright_detuned_rabi
+from repository.components import PrepareAtom, Pulse, ReadoutFluorescence
 
-from cold_atom_sim_examples.reusable.make_shot_scan import make_shot_chunk_exp_fragments_from_shot
-from cold_atom_sim_examples.reusable.single_shot_base import SingleShotBase
+from repository.reusable.make_shot_scan import make_shot_chunk_exp_fragments_from_shot
+from repository.reusable.single_shot_base import SingleShotBase
 
 class OneShot(SingleShotBase):
     def build_fragment(self):
