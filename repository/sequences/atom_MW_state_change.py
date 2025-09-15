@@ -24,6 +24,8 @@ class OneShot(SingleShotBase):
         self.setattr_param("resonance_position", FloatParam, "Resonance location", default=10.0*MHz, unit="MHz")
         self.setattr_param("rabi_freq",     FloatParam, "Rabi frequency",  default=1*MHz, unit="MHz", min=0.0)
 
+        # self.setattr_param_rebind("frequency", self.pulse.frequency, "frequency")
+
         # Efficient handle to set p_bright
         _, self._pb_store = self.ro.override_param("p_bright")
 
@@ -58,13 +60,13 @@ class MultiShotAnalysed(MultiShot):
                 OpaqueChannel("t_pi_fit_xs"),
                 OpaqueChannel("t_pi_fit_ys"),
                 FloatChannel("t_pi", "Fitted π time", unit="us"),
-                FloatChannel("t_pi_err", "Fitted π time error", unit="us")
+                FloatChannel("t_pi_err", "Fitted π time error", unit="us", display_hints={"error_bar_for": "_t_pi"})
             ]),
             CustomAnalysis([self.carrier.shot.pulse.frequency], self._analyse_frequency_scan, [
                 OpaqueChannel("f0_fit_xs"),
                 OpaqueChannel("f0_fit_ys"),
                 FloatChannel("f0", "Fitted centre frequency", unit="us"),
-                FloatChannel("f0_err", "Fitted centre frequency error", unit="us")
+                FloatChannel("f0_err", "Fitted centre frequency error", unit="us", display_hints={"error_bar_for": "_f0"})
             ])
         ]
 
