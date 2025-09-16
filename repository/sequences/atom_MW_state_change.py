@@ -2,7 +2,7 @@ from ndscan.experiment import (
     ExpFragment, kernel, rpc,
     FloatParam, IntParam,
     IntChannel, FloatChannel, OpaqueChannel,
-    MHz, us, ms,
+    MHz, us, ms, A,
     make_fragment_scan_exp, CustomAnalysis, annotations
 )
 import oitg
@@ -21,10 +21,8 @@ class OneShot(SingleShotBase):
         self.setattr_fragment("ro",    ReadoutFluorescence)
 
         # Lineshape parameters
-        self.setattr_param("resonance_position", FloatParam, "Resonance location", default=10.0*MHz, unit="MHz")
+        self.setattr_param("coil_current",  FloatParam, "Coil Current",    default=0*A, unit="A")
         self.setattr_param("rabi_freq",     FloatParam, "Rabi frequency",  default=1*MHz, unit="MHz", min=0.0)
-
-        # self.setattr_param_rebind("frequency", self.pulse.frequency, "frequency")
 
         # Efficient handle to set p_bright
         _, self._pb_store = self.ro.override_param("p_bright")
@@ -36,7 +34,7 @@ class OneShot(SingleShotBase):
         # Simulate atom response (state -> p_bright)
         pb = p_bright_detuned_rabi(
             self.pulse.frequency.get(),        # Hz
-            self.resonance_position.get(),     # Hz
+            self.coil_current.get(),     # Hz
             self.rabi_freq.get(),              # Hz
             self.pulse.duration.get(),         # seconds
         )
@@ -65,8 +63,8 @@ class MultiShotAnalysed(MultiShot):
             CustomAnalysis([self.carrier.shot.pulse.frequency], self._analyse_frequency_scan, [
                 OpaqueChannel("f0_fit_xs"),
                 OpaqueChannel("f0_fit_ys"),
-                FloatChannel("f0", "Fitted centre frequency", unit="us"),
-                FloatChannel("f0_err", "Fitted centre frequency error", unit="us", display_hints={"error_bar_for": "_f0"})
+                FloatChannel("f0", "Fitted centre frequency", unit="MHz"),
+                FloatChannel("f0_err", "Fitted centre frequency error", unit="MHz", display_hints={"error_bar_for": "_f0"})
             ])
         ]
 

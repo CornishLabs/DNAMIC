@@ -19,7 +19,7 @@ class PrepareAtom(ExpFragment):
 class Pulse(ExpFragment):
     def build_fragment(self):
         self.setattr_param("frequency",   FloatParam, "Drive freq",    default=10.0*MHz, unit="MHz")
-        self.setattr_param("duration", FloatParam, "Duration", default=0.25*us,  unit="us", min=0.0)
+        self.setattr_param("duration", FloatParam, "Duration", default=0.48*us,  unit="us", min=0.0)
 
     def run_once(self):
         print(f"[Pulse] f={self.frequency.get()/MHz:.3f} MHz, t={self.duration.get()/us:.2f} µs")
