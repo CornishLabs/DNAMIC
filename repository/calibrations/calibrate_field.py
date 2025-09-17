@@ -10,7 +10,6 @@ from ndscan.experiment import (
 import oitg
 from repository.sequences.atom_MW_state_change import MultiShotAnalysed
 
-
 class ScanFrequency(SubscanExpFragment):
     def build_fragment(self):
         self.setattr_fragment("one_p", MultiShotAnalysed)
@@ -54,6 +53,8 @@ class ScanFrequency(SubscanExpFragment):
         analysis_results["f00_err"].push(fit_errs["a"])
         analysis_results["f0_MHz_shift_per_A"].push(fit_results["b"])
         analysis_results["f0_MHz_shift_per_A_err"].push(fit_errs["b"])
+
+        self.set_dataset("f00", fit_results["a"], broadcast=True, unit="MHz")
 
         return [
             annotations.curve_1d(x_axis=self.one_p.carrier.shot.coil_current,
