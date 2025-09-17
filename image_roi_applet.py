@@ -2,7 +2,7 @@
 # ARTIQ applet (PyQt6 + pyqtgraph) with:
 # - ImageView + histogram panel
 # - magma colormap (few control points => sane histogram handles)
-# - ROI overlays (optional), counts labels (optional)
+# - interactive pixel-snapped ROIs that write back to the 'rois' dataset
 # - single top-row toolbar: [Autoscale] [Auto once]  <x,y,val>
 # - autoscale uses min/max; histogram bounds stay in sync
 
@@ -16,7 +16,6 @@ from artiq.applets.simple import SimpleApplet
 
 
 def _simple_colormap(name="magma", stops=6) -> pg.ColorMap:
-    """Build a ColorMap with only `stops` control points from a named pg colormap."""
     base = pg.colormap.get(name)  # modern API
     lut = base.getLookupTable(0.0, 1.0, stops)    # (stops x 3 or x4) uint8
     colors = lut[:, :3]                           # Nx3 RGB
@@ -28,6 +27,7 @@ class ImageWithROIs(pg.ImageView):
     def __init__(self, args, req):
         super().__init__()
         self.args = args
+        self.req = req   # <-- keep request interface so we can set datasets
 
         # Show histogram; hide extra buttons for a clean look.
         if getattr(self.ui, "menuBtn", None):
@@ -43,9 +43,11 @@ class ImageWithROIs(pg.ImageView):
         self._cmap = _simple_colormap("magma", stops=6)
         self.setColorMap(self._cmap)   # updates both image & histogram
 
-        self._roi_curves, self._roi_labels = [], []
+        # State
         self._img_np = None
-        self._autoscale = True  # autoscale ON by default
+        self._autoscale = True
+        self._roi_items = []       # list[pg.RectROI]
+        self._internal_update = False  # guard to avoid feedback loops
 
         # ---- Single top-row toolbar overlay: [Autoscale] [Auto once]  position ----
         vp = self.ui.graphicsView.viewport()
@@ -56,10 +58,9 @@ class ImageWithROIs(pg.ImageView):
 
         self._chk_autoscale = QtWidgets.QCheckBox("Autoscale", self._toolbar)
         self._chk_autoscale.setChecked(self._autoscale)
-
         self._btn_auto_once = QtWidgets.QPushButton("Auto once", self._toolbar)
 
-        # Position label (monospace), fixed-ish width so the bar doesn't jump
+        # Position label (monospace), fixed-ish width
         self._pos_label = QtWidgets.QLabel("", self._toolbar)
         self._pos_label.setStyleSheet("QLabel { font-family: monospace; }")
         self._pos_label.setMinimumWidth(200)
@@ -93,17 +94,16 @@ class ImageWithROIs(pg.ImageView):
     # Keep toolbar in the corner when the view resizes
     def eventFilter(self, obj, ev):
         if obj is self.ui.graphicsView.viewport() and ev.type() == QtCore.QEvent.Type.Resize:
-            self._toolbar.move(6, 6)
-            self._toolbar.adjustSize()
+            self._toolbar.move(6, 6); self._toolbar.adjustSize()
         return super().eventFilter(obj, ev)
+    
 
     # ----- level helpers (sync image + histogram) ----------------------------
     def _set_levels(self, lo: float, hi: float) -> None:
-        """Update both the ImageItem and the histogram widget region."""
         self.getImageItem().setLevels((lo, hi))
         if getattr(self.ui, "histogram", None) is not None:
             try:
-                self.ui.histogram.setLevels(lo, hi)   # modern API
+                self.ui.histogram.setLevels(lo, hi)
             except Exception:
                 if hasattr(self.ui.histogram, "region"):
                     self.ui.histogram.region.setRegion((lo, hi))
@@ -121,63 +121,125 @@ class ImageWithROIs(pg.ImageView):
     def _on_autoscale_toggled(self, state: bool):
         self._autoscale = bool(state)
         if self._autoscale and self._img_np is not None:
-            # Apply min/max on the current frame immediately
             self._apply_levels_minmax(self._img_np)
 
     def _apply_auto_levels_once(self):
-        """One-shot min/max level set; leaves autoscale OFF afterward."""
         if self._apply_levels_minmax(self._img_np):
             self._chk_autoscale.setChecked(False)
 
-    # ----- overlays: ROIs ----------------------------------------------------
-    def _clear_rois(self):
+    # ----- interactive ROIs --------------------------------------------------
+    def _clear_roi_items(self):
         vb = self.getView()
-        for it in self._roi_curves:
+        for it in self._roi_items:
             vb.removeItem(it)
-        for it in self._roi_labels:
-            vb.removeItem(it)
-        self._roi_curves.clear()
-        self._roi_labels.clear()
+        self._roi_items.clear()
 
-    def _draw_rois(self, rois, counts=None):
-        self._clear_rois()
+    def _ensure_roi_items(self, rois):
+        """Create or update interactive RectROIs to match list of (y0,y1,x0,x1)."""
         if rois is None:
+            self._clear_roi_items()
             return
+
         rois = np.asarray(rois)
         if rois.ndim != 2 or rois.shape[1] != 4:
             return
 
         vb = self.getView()
-        have_counts = counts is not None and len(counts) == len(rois)
-        for i, (y0, y1, x0, x1) in enumerate(rois):
-            xs = np.array([x0, x1, x1, x0, x0], float)
-            ys = np.array([y0, y0, y1, y1, y0], float)
-            curve = pg.PlotCurveItem(xs, ys, pen=pg.mkPen((255, 255, 255, 200), width=2))
-            curve.setZValue(10)
-            vb.addItem(curve)
-            self._roi_curves.append(curve)
-            if have_counts:
-                cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
-                lbl = pg.TextItem(text=str(int(counts[i])), anchor=(0.5, 0.5))
-                lbl.setPos(cx, cy)
-                lbl.setZValue(11)
-                vb.addItem(lbl)
-                self._roi_labels.append(lbl)
+
+        # Build from scratch if list length changed
+        rebuild = (len(self._roi_items) != len(rois))
+        if rebuild:
+            self._clear_roi_items()
+            for i, (y0, y1, x0, x1) in enumerate(rois):
+                pos  = pg.Point(float(x0), float(y0))
+                size = pg.Point(float(x1 - x0), float(y1 - y0))
+                r = pg.RectROI(
+                    pos, size,
+                    sideScalers=False,
+                    rotatable=False,
+                    scaleSnap=True, translateSnap=True, snapSize=1.0,
+                    pen=pg.mkPen((255, 255, 255, 220), width=3),
+                    hoverPen=pg.mkPen((0, 200, 255, 220), width=3),
+                )
+                r.setZValue(10)
+                # When the user finishes moving/resizing, snap + push dataset
+                r.sigRegionChangeFinished.connect(self._on_roi_finished)
+                vb.addItem(r)
+                self._roi_items.append(r)
+        else:
+            # Update positions/sizes without re-creating
+            self._internal_update = True
+            try:
+                for i, (y0, y1, x0, x1) in enumerate(rois):
+                    r = self._roi_items[i]
+                    # setPos/setSize with finish=False to avoid extra signals
+                    r.setPos(pg.Point(float(x0), float(y0)), finish=False)
+                    r.setSize(pg.Point(float(x1 - x0), float(y1 - y0)), finish=False)
+            finally:
+                self._internal_update = False
+
+    def _on_roi_finished(self, *args):
+        """Snap ROI to integer grid, clamp to image, and write back dataset."""
+        if self._internal_update:
+            return
+        if self._img_np is None:
+            return
+
+        n_y, n_x = self._img_np.shape[:2]
+
+        # Snap each ROI to integer grid (position and size)
+        self._internal_update = True
+        try:
+            new_list = []
+            for r in self._roi_items:
+                x0f, y0f = r.pos().x(), r.pos().y()
+                wf, hf   = r.size().x(), r.size().y()
+
+                # Round to nearest pixel (you can switch to floor/ceil if preferred)
+                x0 = int(round(x0f))
+                y0 = int(round(y0f))
+                w  = max(1, int(round(wf)))
+                h = max(1, int(round(hf)))
+
+                # Clamp inside image bounds
+                x0 = min(max(0, x0), max(0, n_x - 1))
+                y0 = min(max(0, y0), max(0, n_y - 1))
+                x1 = min(x0 + w, n_x)
+                y1 = min(y0 + h, n_y)
+
+                # Apply snapped geometry back to the ROI (no 'finish' to avoid loops)
+                r.setPos(pg.Point(x0, y0), finish=False)
+                r.setSize(pg.Point(x1 - x0, y1 - y0), finish=False)
+
+                new_list.append((int(y0), int(y1), int(x0), int(x1)))
+        finally:
+            self._internal_update = False
+
+        # Push updated ROI list back to dataset (persist so it survives)
+        rois_name = getattr(self.args, "rois", None)
+        if rois_name:
+            self.req.set_dataset(rois_name, new_list, persist=True)
 
     # ----- mouse readout (constant-size, top row) ----------------------------
     def _on_mouse_moved(self, evt):
+        # Check we have an image
         if self._img_np is None:
             self._pos_label.setText("")
             return
+        
+        # Check our mouse is in the scene
         pos = evt[0]
         vb = self.getView()
         if not vb.sceneBoundingRect().contains(pos):
             self._pos_label.setText("")
             return
-        p = vb.mapSceneToView(pos)
-        # floor so any position within [i, i+1) selects pixel i
+        
+        # Map to image pixel
+        p = vb.mapSceneToView(pos) 
         x = int(np.floor(p.x()))
         y = int(np.floor(p.y()))
+        
+        # If in the image, show position & value
         n_y, n_x = self._img_np.shape[:2]
         if 0 <= x < n_x and 0 <= y < n_y:
             val = self._img_np[y, x]
@@ -187,27 +249,31 @@ class ImageWithROIs(pg.ImageView):
 
     # ----- ARTIQ hook --------------------------------------------------------
     def data_changed(self, value, metadata, persist, mods):
+        # Update the image only when it actually changes
         img = value.get(self.args.image)
         if img is not None:
             arr = np.array(img)
-            self._img_np = arr
-            # Draw without autoLevels; apply min/max ourselves if autoscale is on.
-            self.setImage(arr, autoLevels=False)
-            if self._autoscale:
-                self._apply_levels_minmax(arr)
+            first_frame = self._img_np is None
 
+            self._img_np = arr
+
+            self.setImage(
+                arr,
+                autoRange=False,
+                autoLevels=self._autoscale,
+                autoHistogramRange=first_frame, # Allow autoHistogramRange on the very first frame so the image appears; after that, keep the range.
+            )
+
+        # ROIs — this does NOT touch the image/zoom
         rois_name = getattr(self.args, "rois", None)
-        counts_name = getattr(self.args, "counts", None)
-        rois = value.get(rois_name) if rois_name else None
-        counts = value.get(counts_name) if counts_name else None
-        self._draw_rois(rois, counts)
+        rois = value.get(rois_name)   if rois_name   else None
+        self._ensure_roi_items(rois)
 
 
 def main():
     applet = SimpleApplet(ImageWithROIs)
     applet.add_dataset("image", "2D image dataset")
     applet.add_dataset("rois", "Optional ROI list: (y0,y1,x0,x1)", required=False)
-    applet.add_dataset("counts", "Optional counts per ROI", required=False)
     applet.run()
 
 
