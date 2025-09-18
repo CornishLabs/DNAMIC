@@ -4,6 +4,7 @@ from ndscan.experiment import (
     CustomAnalysis, FloatChannel, make_fragment_scan_exp
 )
 import math
+import numpy as np
 
 def make_shot_indexed_carrier(ShotCls):
     """Return a concrete carrier class wrapping `ShotCls` and owning `shot_index` + analysis."""
@@ -30,9 +31,12 @@ def make_shot_indexed_carrier(ShotCls):
             ]
 
         def _analyse_shots_to_p(self, axis_values, result_values, analysis_results):
-            classes_handle = self.shot.get_classification_handle()
-            classes = result_values[classes_handle]
-            n = len(classes)
+            classes_handle = self.shot.get_counts_handle()
+            counts = result_values[classes_handle]
+            all_counts = np.concatenate(counts)
+            threshold = self.get_dataset("threshold",default=2000)
+            classes = all_counts > threshold
+            n=len(classes)
             k = int(sum(1 for v in classes if v))
             p_hat = (k/n) if n else 0.0
 

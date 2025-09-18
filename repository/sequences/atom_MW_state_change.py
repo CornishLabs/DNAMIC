@@ -42,8 +42,8 @@ class OneShot(SingleShotBase):
 
         self.ro.run_once()
 
-    def get_classification_handle(self):
-        return self.ro.is_bright_class
+    # def get_classification_handle(self):
+    #     return self.ro.is_bright_class
 
     def get_counts_handle(self):
         return self.ro.counts

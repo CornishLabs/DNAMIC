@@ -2,7 +2,7 @@ from ndscan.experiment import (
     ExpFragment,
     FloatParam, IntParam,
     IntChannel,
-    MHz, us, ms
+    MHz, us, ms, OpaqueChannel
 )
 import random, numpy as np
 import time
@@ -28,32 +28,35 @@ class Pulse(ExpFragment):
 class ReadoutFluorescence(ExpFragment):
     def build_fragment(self):
         self.setattr_param("p_bright",    FloatParam, "Bright prob", default=0.5, min=0.0, max=1.0)
-        self.setattr_param("threshold",   IntParam,   "Threshold",   default=600,    min=0)
+        # self.setattr_param("threshold",   IntParam,   "Threshold",   default=600,    min=0)
 
-        self.setattr_result("counts",          IntChannel)
-        self.setattr_result("is_bright_class", IntChannel)
+        self.setattr_result("counts",          OpaqueChannel)
+        # self.setattr_result("is_bright_class", OpaqueChannel)
 
     def run_once(self):
         pb  = self.p_bright.get()
-        thr = self.threshold.get()
+        # thr = self.threshold.get()
 
-        image = image_from_probs_and_locs([(16,16,pb),(24,16,pb),(32,16,pb)])
+        image = image_from_probs_and_locs([(6+6*i,16,pb) for i in range(8)])
+        self.set_dataset("last_image",image,broadcast=True)
 
         try:
             rois = self.get_dataset("rois",archive=False)
         except KeyError:
-            # sensible default: three 4×4 boxes centered on your sites
-            rois = [(14,18,14,18), (14,18,22,26), (14,18,30,34)]
+            # sensible default
+            rois = [(15, 18, 5, 8), (15, 18, 11, 14), (15, 18, 17, 20), (15, 18, 23, 26), (15, 18, 29, 32), (15, 18, 35, 38), (15, 18, 41, 44), (15, 18, 47, 50)]
             self.set_dataset("rois", rois, broadcast=True)
 
         # Sum counts in each ROI and classify
-        y0,y1,x0,x1 = rois[0]
-        cts = int(image[y0:y1, x0:x1].sum()) 
-        classified = int(cts >= thr) # [int(c >= thr) for c in cts]
+        counts = np.empty(len(rois), dtype=np.int16)
+        # is_bright_class = np.empty(len(rois), dtype=bool)
+        for roi_i, (y0,y1,x0,x1) in enumerate(rois):
+            cts = int(image[y0:y1, x0:x1].sum()) 
+            # classified = int(cts >= thr) # [int(c >= thr) for c in cts]
+            counts[roi_i] = cts
+            # is_bright_class[roi_i] = classified
+        
+        self.counts.push(counts)
+        # self.is_bright_class.push(is_bright_class)
 
-        self.set_dataset("last_image",image,broadcast=True)
-
-        print(f"[Readout] p_b={pb:.3f} | cts={cts} thr={thr} → {'B' if classified else 'D'}")
-
-        self.counts.push(cts)
-        self.is_bright_class.push(classified)
+        print(f"[Readout] p_b={pb:.3f}")

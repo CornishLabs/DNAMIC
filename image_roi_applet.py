@@ -8,11 +8,11 @@
 
 import numpy as np
 import PyQt6  # ensure pyqtgraph binds to Qt6
-from PyQt6 import QtWidgets, QtCore
+from PyQt6 import QtWidgets, QtCore, QtGui
 import pyqtgraph as pg
-pg.setConfigOptions(imageAxisOrder='row-major')  # width = n_x, height = n_y
-
 from artiq.applets.simple import SimpleApplet
+
+pg.setConfigOptions(imageAxisOrder='row-major')  # width = n_x, height = n_y
 
 
 def _simple_colormap(name="magma", stops=6) -> pg.ColorMap:
@@ -46,7 +46,8 @@ class ImageWithROIs(pg.ImageView):
         # State
         self._img_np = None
         self._autoscale = True
-        self._roi_items = []       # list[pg.RectROI]
+        self._roi_items = []        # list[list[pg.RectROI]]
+        self._roi_labels = []       # list[list[pg.TextItem]]
         self._internal_update = False  # guard to avoid feedback loops
 
         # ---- Single top-row toolbar overlay: [Autoscale] [Auto once]  position ----
@@ -94,7 +95,8 @@ class ImageWithROIs(pg.ImageView):
     # Keep toolbar in the corner when the view resizes
     def eventFilter(self, obj, ev):
         if obj is self.ui.graphicsView.viewport() and ev.type() == QtCore.QEvent.Type.Resize:
-            self._toolbar.move(6, 6); self._toolbar.adjustSize()
+            self._toolbar.move(6, 6)
+            self._toolbar.adjustSize()
         return super().eventFilter(obj, ev)
     
 
@@ -130,9 +132,16 @@ class ImageWithROIs(pg.ImageView):
     # ----- interactive ROIs --------------------------------------------------
     def _clear_roi_items(self):
         vb = self.getView()
-        for it in self._roi_items:
-            vb.removeItem(it)
-        self._roi_items.clear()
+        # Remove ROI graphics
+        for roig in self._roi_items:
+            for it in roig:
+                vb.removeItem(it)
+        # Remove label graphics
+        for labg in self._roi_labels:
+            for lb in labg:
+                vb.removeItem(lb)
+        self._roi_items = []
+        self._roi_labels = []
 
     def _ensure_roi_items(self, rois):
         """Create or update interactive RectROIs to match list of (y0,y1,x0,x1)."""
@@ -141,7 +150,7 @@ class ImageWithROIs(pg.ImageView):
             return
 
         rois = np.asarray(rois)
-        if rois.ndim != 2 or rois.shape[1] != 4:
+        if rois.ndim != 3 or rois.shape[2] != 4:
             return
 
         vb = self.getView()
@@ -150,31 +159,56 @@ class ImageWithROIs(pg.ImageView):
         rebuild = (len(self._roi_items) != len(rois))
         if rebuild:
             self._clear_roi_items()
-            for i, (y0, y1, x0, x1) in enumerate(rois):
-                pos  = pg.Point(float(x0), float(y0))
-                size = pg.Point(float(x1 - x0), float(y1 - y0))
-                r = pg.RectROI(
-                    pos, size,
-                    sideScalers=False,
-                    rotatable=False,
-                    scaleSnap=True, translateSnap=True, snapSize=1.0,
-                    pen=pg.mkPen((255, 255, 255, 220), width=3),
-                    hoverPen=pg.mkPen((0, 200, 255, 220), width=3),
-                )
-                r.setZValue(10)
-                # When the user finishes moving/resizing, snap + push dataset
-                r.sigRegionChangeFinished.connect(self._on_roi_finished)
-                vb.addItem(r)
-                self._roi_items.append(r)
+            for gi, roi_g in enumerate(rois):
+                self._roi_items.append([])
+                self._roi_labels.append([])
+                for roi_i, (y0, y1, x0, x1) in enumerate(roi_g):
+                    pos  = pg.Point(float(x0), float(y0))
+                    size = pg.Point(float(x1 - x0), float(y1 - y0))
+                    r = pg.RectROI(
+                        pos, size,
+                        sideScalers=False,
+                        rotatable=False,
+                        scaleSnap=True, translateSnap=True, snapSize=1.0,
+                        pen=pg.mkPen((255, 255, 255, 220), width=2),
+                        hoverPen=pg.mkPen((0, 200, 255, 220), width=3),
+                    )
+                    r.setZValue(10)
+                    # When the user finishes moving/resizing, snap + push dataset
+                    r.sigRegionChangeFinished.connect(self._on_roi_finished)
+                    vb.addItem(r)
+                    self._roi_items[gi].append(r)
+
+                    label_text = f"({gi},{roi_i})"
+                    # --- does not scale with zoom ---
+                    # lbl = pg.TextItem(
+                    #     text=label_text,
+                    #     anchor=(0, 0),                       
+                    #     fill=pg.mkColor(0, 0, 0, 140)       
+                    # )
+                
+                    # --- scales with zoom ---
+                    lbl = QtWidgets.QGraphicsSimpleTextItem(label_text)
+                    font = QtGui.QFont()
+                    font.setPointSizeF(1)
+                    font.setWeight(QtGui.QFont.Weight.DemiBold)
+                    lbl.setFont(font)
+                    lbl.setBrush(QtGui.QBrush(QtGui.QColor(255, 255, 255)))
+                    
+                    lbl.setParentItem(r)                     
+                    lbl.setPos(0, 0)     
+                    lbl.setZValue(11)
+                    self._roi_labels[gi].append(lbl)
         else:
             # Update positions/sizes without re-creating
             self._internal_update = True
             try:
-                for i, (y0, y1, x0, x1) in enumerate(rois):
-                    r = self._roi_items[i]
-                    # setPos/setSize with finish=False to avoid extra signals
-                    r.setPos(pg.Point(float(x0), float(y0)), finish=False)
-                    r.setSize(pg.Point(float(x1 - x0), float(y1 - y0)), finish=False)
+                for gi, roi_g in enumerate(rois):
+                    for roi_i, (y0, y1, x0, x1) in enumerate(roi_g):
+                        r = self._roi_items[gi][roi_i]
+                        # setPos/setSize with finish=False to avoid extra signals
+                        r.setPos(pg.Point(float(x0), float(y0)), finish=False)
+                        r.setSize(pg.Point(float(x1 - x0), float(y1 - y0)), finish=False)
             finally:
                 self._internal_update = False
 
@@ -191,27 +225,30 @@ class ImageWithROIs(pg.ImageView):
         self._internal_update = True
         try:
             new_list = []
-            for r in self._roi_items:
-                x0f, y0f = r.pos().x(), r.pos().y()
-                wf, hf   = r.size().x(), r.size().y()
+            for roi_g in self._roi_items:
+                new_group_list = []
+                for r in roi_g:
+                    x0f, y0f = r.pos().x(), r.pos().y()
+                    wf, hf   = r.size().x(), r.size().y()
 
-                # Round to nearest pixel (you can switch to floor/ceil if preferred)
-                x0 = int(round(x0f))
-                y0 = int(round(y0f))
-                w  = max(1, int(round(wf)))
-                h = max(1, int(round(hf)))
+                    # Round to nearest pixel (you can switch to floor/ceil if preferred)
+                    x0 = int(round(x0f))
+                    y0 = int(round(y0f))
+                    w  = max(1, int(round(wf)))
+                    h = max(1, int(round(hf)))
 
-                # Clamp inside image bounds
-                x0 = min(max(0, x0), max(0, n_x - 1))
-                y0 = min(max(0, y0), max(0, n_y - 1))
-                x1 = min(x0 + w, n_x)
-                y1 = min(y0 + h, n_y)
+                    # Clamp inside image bounds
+                    x0 = min(max(0, x0), max(0, n_x - 1))
+                    y0 = min(max(0, y0), max(0, n_y - 1))
+                    x1 = min(x0 + w, n_x)
+                    y1 = min(y0 + h, n_y)
 
-                # Apply snapped geometry back to the ROI (no 'finish' to avoid loops)
-                r.setPos(pg.Point(x0, y0), finish=False)
-                r.setSize(pg.Point(x1 - x0, y1 - y0), finish=False)
+                    # Apply snapped geometry back to the ROI (no 'finish' to avoid loops)
+                    r.setPos(pg.Point(x0, y0), finish=False)
+                    r.setSize(pg.Point(x1 - x0, y1 - y0), finish=False)
 
-                new_list.append((int(y0), int(y1), int(x0), int(x1)))
+                    new_group_list.append((int(y0), int(y1), int(x0), int(x1)))
+                new_list.append(new_group_list)
         finally:
             self._internal_update = False
 
