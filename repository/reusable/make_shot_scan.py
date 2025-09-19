@@ -1,10 +1,11 @@
 from ndscan.experiment import (
     ExpFragment, SubscanExpFragment,
     IntParam, LinearGenerator, ScanOptions,
-    CustomAnalysis, FloatChannel, make_fragment_scan_exp
+    CustomAnalysis, FloatChannel, make_fragment_scan_exp, IntChannel
 )
 import math
 import numpy as np
+from repository.reusable.stats import jeffreys_median_ci, moment_matched_beta_for_average, beta_quartiles, pooled_posterior_beta
 
 def make_shot_indexed_carrier(ShotCls):
     """Return a concrete carrier class wrapping `ShotCls` and owning `shot_index` + analysis."""
@@ -19,39 +20,71 @@ def make_shot_indexed_carrier(ShotCls):
 
         # Summarise the N shots → p ± err (uses child’s declared handles)
         def get_default_analyses(self):
+            rois = self.get_dataset("rois")
+
+            channels = []
+            for roi_i in range(len(rois[0])):
+                pre_key_avg = f"GaR{roi_i}"
+                channels.append(FloatChannel(f"{pre_key_avg}_p", f"{pre_key_avg} bright prob", display_hints={"priority": 4}))
+                channels.append(FloatChannel(f"{pre_key_avg}_p_upper_err", f"{pre_key_avg} bright prob upper error", display_hints={"priority": -2}))
+                channels.append(FloatChannel(f"{pre_key_avg}_p_lower_err", f"{pre_key_avg} bright prob lower error", display_hints={"priority": -2}))
+                channels.append(FloatChannel(f"{pre_key_avg}_p_avg_err", f"{pre_key_avg} bright prob avg error",display_hints={"error_bar_for": f"_{pre_key_avg}_p"}))
+                # channels.append(IntChannel(f"{pre_key_avg}_n", f"{pre_key_avg} number of shots", display_hints={"priority": -2}))
+                # channels.append(IntChannel(f"{pre_key_avg}_y", f"{pre_key_avg} number of bright shots", display_hints={"priority": -2}))
+                for gi in range(len(rois)):
+                    pre_key = f"G{gi}R{roi_i}"
+                    channels.append(FloatChannel(f"{pre_key}_p", f"{pre_key} bright prob", display_hints={"priority": 2, "share_axis_with": f"_G0R{roi_i}_p"}))
+                    channels.append(FloatChannel(f"{pre_key}_p_upper_err", f"{pre_key} bright prob upper error", display_hints={"priority": -2}))
+                    channels.append(FloatChannel(f"{pre_key}_p_lower_err", f"{pre_key} bright prob lower error", display_hints={"priority": -2}))
+                    channels.append(FloatChannel(f"{pre_key}_p_avg_err", f"{pre_key} bright prob avg error",display_hints={"error_bar_for": f"_{pre_key}_p"}))
+                    channels.append(IntChannel(f"{pre_key}_n", f"{pre_key} number of shots", display_hints={"priority": -2}))
+                    channels.append(IntChannel(f"{pre_key}_y", f"{pre_key} number of bright shots", display_hints={"priority": -2}))
             return [
                 CustomAnalysis(
                     [self.shot_index],
                     self._analyse_shots_to_p,
-                    [
-                        FloatChannel("p", "Bright probability"),
-                        FloatChannel("p_err", "± error", display_hints={"error_bar_for": "_p", "priority": 2}),
-                    ],
+                    channels,
                 )
             ]
 
         def _analyse_shots_to_p(self, axis_values, result_values, analysis_results):
             classes_handle = self.shot.get_counts_handle()
-            counts = result_values[classes_handle]
-            all_counts = np.concatenate(counts)
+            counts = np.asarray(result_values[classes_handle])
             threshold = self.get_dataset("threshold",default=2000)
-            classes = all_counts > threshold
-            n=len(classes)
-            k = int(sum(1 for v in classes if v))
-            p_hat = (k/n) if n else 0.0
+            rois = self.get_dataset("rois")
+            
+            n=np.sum(np.ones_like(counts),axis=0)
+            y=np.sum(counts>threshold,axis=0)
 
-            z = 1.0  # ~68% CI
-            if n:
-                denom  = 1.0 + (z*z)/n
-                center = (p_hat + (z*z)/(2*n)) / denom
-                radius = (z * math.sqrt(p_hat*(1.0 - p_hat)/n + (z*z)/(4*n*n))) / denom
-                lower, upper = max(0.0, center - radius), min(1.0, center + radius)
-                p_err = max(upper - p_hat, p_hat - lower)
-            else:
-                p_err = 1.0
+            med,low,high = jeffreys_median_ci(y, n)
+            rel_upper_err = high-med
+            rel_low_err = med-low
+            rel_avg_err=(high-low)/2
+            
+            for roi_i in range(len(rois[0])):
+                pre_key_avg = f"GaR{roi_i}"
+                for gi in range(len(rois)):
+                    pre_key = f"G{gi}R{roi_i}"
+                    analysis_results[f"{pre_key}_p"].push(med[gi,roi_i])
+                    analysis_results[f"{pre_key}_p_upper_err"].push(rel_upper_err[gi,roi_i])
+                    analysis_results[f"{pre_key}_p_lower_err"].push(rel_low_err[gi,roi_i])
+                    analysis_results[f"{pre_key}_p_avg_err"].push(rel_avg_err[gi,roi_i])
+                    analysis_results[f"{pre_key}_n"].push(n[gi,roi_i])
+                    analysis_results[f"{pre_key}_y"].push(y[gi,roi_i])
+                a_star, b_star= pooled_posterior_beta(y[:,roi_i],n[:,roi_i])#, drift_aware=True)
+                lower_all,med_all,upper_all = beta_quartiles(a_star, b_star)
+                print(lower_all,med_all,upper_all)
+                rel_lower_all = med_all-lower_all
+                rel_upper_all = upper_all - med_all
+                rel_avg_all = (upper_all-lower_all)/2
+                analysis_results[f"{pre_key_avg}_p"].push(med_all)
+                analysis_results[f"{pre_key_avg}_p_upper_err"].push(rel_upper_all)
+                analysis_results[f"{pre_key_avg}_p_lower_err"].push(rel_lower_all)
+                analysis_results[f"{pre_key_avg}_p_avg_err"].push(rel_avg_all)
+                # analysis_results[f"{pre_key_avg}_n"].push(n[gi,roi_i])
+                # analysis_results[f"{pre_key_avg}_y"].push(y[gi,roi_i])
 
-            analysis_results["p"].push(p_hat)
-            analysis_results["p_err"].push(p_err)
+
             return []
 
     return ShotCarrier

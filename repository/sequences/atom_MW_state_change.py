@@ -73,8 +73,8 @@ class MultiShotAnalysed(MultiShot):
         # See: https://oxfordiontrapgroup.github.io/ndscan/apidocs.html#module-ndscan.experiment.default_analysis
         # Conceptually, analyses are attached to a fragment, and produce results “the next level up” 
         #    – that is, they condense all the points from a scan over a particular choice of parameters into a few derived results.
-        y = result_values[self._p]
-        y_err = result_values[self._p_err]
+        y = result_values[self._GaR0_p]
+        y_err = result_values[self._GaR0_p_avg_err]
 
         fit_results, fit_errs, fit_xs, fit_ys = oitg.fitting.sinusoid.fit(
             x, y, y_err, evaluate_function=True, evaluate_n=200)
@@ -92,14 +92,14 @@ class MultiShotAnalysed(MultiShot):
                                       position_error=fit_errs["t_pi"]),
             annotations.curve_1d(x_axis=self.carrier.shot.pulse.duration,
                                  x_values=fit_xs,
-                                 y_axis=self._p,
+                                 y_axis=self._GaR0_p,
                                  y_values=fit_ys)
         ]
     
     def _analyse_frequency_scan(self, axis_values, result_values, analysis_results):
         x = axis_values[self.carrier.shot.pulse.frequency]
-        y = result_values[self._p]
-        y_err = result_values[self._p_err]
+        y = result_values[self._GaR0_p]
+        y_err = result_values[self._GaR0_p_avg_err]
 
         fit_results, fit_errs, fit_xs, fit_ys = oitg.fitting.sinc_2.fit(
             x, y, y_err, evaluate_function=True, evaluate_n=200, initialise = {'y0':0.0, 'a': 1.0, 'width': 1e6})
@@ -116,7 +116,7 @@ class MultiShotAnalysed(MultiShot):
                                       position_error=fit_errs["x0"]),
             annotations.curve_1d(x_axis=self.carrier.shot.pulse.frequency,
                                  x_values=fit_xs,
-                                 y_axis=self._p,
+                                 y_axis=self._GaR0_p,
                                  y_values=fit_ys)
         ]
 
