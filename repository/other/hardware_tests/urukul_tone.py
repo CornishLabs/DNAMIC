@@ -14,7 +14,7 @@ class UrukulTone(EnvExperiment):
         delay(10 * ms)                                          #10ms delay
         
         freq = 10*MHz                                          #defines frequency variable
-        amp = 0.3                                              #defines amplitude variable as an amplitude scale factor(0 to 1)
+        amp = 0.1                                              #defines amplitude variable as an amplitude scale factor(0 to 1)
         attenuation= 3.0*dB                                     #defines attenuation variable
 
         self.urukul0_ch0.set_att(attenuation)                   #writes attenuation to urukul channel
