@@ -44,15 +44,12 @@ class UrukulToneRAMExample(EnvExperiment):
 
     @kernel
     def init_dds(self, dds):
-        self.core.break_realtime()
         dds.init()
         dds.set_att(6.*dB)
         dds.cfg_sw(True)
 
     @kernel
     def configure_ram_mode(self, dds):
-        self.core.break_realtime()
-
         dds.set_cfr1(ram_enable=0) # Control Function Register 1
         self.cpld.io_update.pulse_mu(8)
 
@@ -65,9 +62,7 @@ class UrukulToneRAMExample(EnvExperiment):
 
         # 2) Load once
         dds.amplitude_to_ram(self.amp_reversed, self.asf_ram) # Reverse the logical list to get nice indices
-        # dds.amplitude_to_ram(self.amp, self.asf_ram)
         dds.write_ram(self.asf_ram)
-        self.core.break_realtime()
         
         # 3) Load profiles (the last one will be what we start in)
         for profile, start,end, step, mode in [
@@ -82,7 +77,6 @@ class UrukulToneRAMExample(EnvExperiment):
             )
             self.cpld.io_update.pulse_mu(8)
         
-        self.core.break_realtime()
         
         dds.set(frequency=5*MHz, ram_destination=RAM_DEST_ASF) # Set what the frequency is, and what the RAM does (ASF)
         dds.set_cfr1(ram_enable=1, ram_destination=RAM_DEST_ASF) # Enable RAM, Pass osk_enable=1 to set_cfr1() if it is not an amplitude RAM
@@ -94,8 +88,9 @@ class UrukulToneRAMExample(EnvExperiment):
         self.ttl0.output()
         self.cpld.init()
         self.init_dds(self.dds)
+
         self.configure_ram_mode(self.dds)
-        self.core.break_realtime()
+
         self.ttl0.on()
         self.cpld.set_profile(1)
         delay(6*us)
