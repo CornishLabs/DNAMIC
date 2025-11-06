@@ -13,7 +13,7 @@ class TTL_Output_On_Off_Pulse(EnvExperiment):
         self.core.reset()
         self.ttl0.output()
 
-        delay(1 * us)
+        delay(20 * us)
         self.ttl0.on()
         delay(5 * ms)
         self.ttl0.off()
