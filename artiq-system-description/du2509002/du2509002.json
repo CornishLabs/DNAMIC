@@ -1,0 +1,30 @@
+{
+    "target": "kasli",
+    "variant": "du2509002",
+    "hw_rev": "v2.0",
+    "base": "satellite",
+    "peripherals": [
+        {
+            "type": "dio",
+            "ports": [0],
+            "bank_direction_low": "input",
+            "bank_direction_high": "input",
+            "edge_counter": true
+        },
+        {
+            "type": "dio",
+            "ports": [1],
+            "bank_direction_low": "input",
+            "bank_direction_high": "input",
+            "edge_counter": true
+        },
+        {
+            "type": "suservo",
+            "sampler_ports": [2, 3],
+            "sampler_hw_rev": "v2.3",
+            "urukul0_ports": [4, 5],
+            "urukul1_ports": [6, 7],
+            "clk_sel": 2
+        }
+    ]
+}
