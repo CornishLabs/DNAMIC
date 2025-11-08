@@ -73,9 +73,8 @@ class ScanXExpFrag(SubscanExpFragment):
         self.setattr_fragment("lineexp", LineExp)
         super().build_fragment(self, "lineexp", [(self.lineexp, "x")])
 
-    def _configure(self): # THIS IS RAGGED
-        p_now = self.lineexp.p.use()
-        n = 2 + (int(p_now) % 3) * 2
+    def _configure(self): # THIS IS UNRAGGED
+        n = 6
         gen = LinearGenerator(0.0, 5.0, n, False)
         opts = ScanOptions(
             num_repeats=1, num_repeats_per_point=1, randomise_order_globally=False
@@ -112,4 +111,4 @@ class HowDoesPVaryExpFrag(SubscanExpFragment):
         self.device_setup_subfragments()
 
 
-RaggedHowDoesPVaryExp = make_fragment_scan_exp(HowDoesPVaryExpFrag)
+UNRaggedHowDoesPVaryExp = make_fragment_scan_exp(HowDoesPVaryExpFrag)
